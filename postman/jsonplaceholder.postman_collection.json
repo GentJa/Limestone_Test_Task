@@ -1,0 +1,225 @@
+{
+  "info": {
+    "name": "JSONPlaceholder - users and posts",
+    "description": "Run in order: 1) pick a user, 2) read that user's posts, 3) read a missing post. Shared checks (status, schema) live in the collection-level test script; each request only declares what it expects.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Local variables survive between requests in a run, so clear the expectations before each request declares its own.",
+          "pm.variables.unset('expectedStatus');",
+          "pm.variables.unset('itemSchema');"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Shared checks for every request. A request opts in by setting local variables in its pre-request script:",
+          "//   expectedStatus - HTTP status the request must return (required)",
+          "//   itemSchema     - name of a schema below; when set, the body must be a non-empty array of matching objects",
+          "const schemas = {",
+          "    user: {",
+          "        type: 'object',",
+          "        required: ['id', 'name', 'username', 'email'],",
+          "        properties: {",
+          "            id: { type: 'integer', minimum: 1 },",
+          "            name: { type: 'string', minLength: 1 },",
+          "            username: { type: 'string', minLength: 1 },",
+          "            email: { type: 'string', minLength: 1, pattern: '^[^@\\\\s]+@[^@\\\\s]+$' }",
+          "        }",
+          "    },",
+          "    post: {",
+          "        type: 'object',",
+          "        required: ['userId', 'id', 'title', 'body'],",
+          "        properties: {",
+          "            userId: { type: 'integer', minimum: 1 },",
+          "            id: { type: 'integer', minimum: 1 },",
+          "            title: { type: 'string', minLength: 1 },",
+          "            body: { type: 'string', minLength: 1 }",
+          "        }",
+          "    }",
+          "};",
+          "",
+          "const expectedStatus = Number(pm.variables.get('expectedStatus'));",
+          "pm.expect(expectedStatus, 'request must set expectedStatus in its pre-request script').to.be.above(0);",
+          "pm.test('Status code is ' + expectedStatus, function () {",
+          "    pm.response.to.have.status(expectedStatus);",
+          "});",
+          "",
+          "pm.test('Content-Type is JSON', function () {",
+          "    pm.response.to.have.header('Content-Type');",
+          "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json');",
+          "});",
+          "",
+          "const maxResponseTimeMs = Number(pm.environment.get('maxResponseTimeMs'));",
+          "pm.test('Response time is below ' + maxResponseTimeMs + ' ms', function () {",
+          "    pm.expect(pm.response.responseTime).to.be.below(maxResponseTimeMs);",
+          "});",
+          "",
+          "const schemaName = pm.variables.get('itemSchema');",
+          "if (schemaName) {",
+          "    pm.test('Every returned object matches the \"' + schemaName + '\" schema (key fields required and not empty)', function () {",
+          "        pm.expect(schemas, 'unknown schema ' + schemaName).to.have.property(schemaName);",
+          "        pm.response.to.have.jsonSchema({ type: 'array', minItems: 1, items: schemas[schemaName] });",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Get users and pick one",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.variables.set('expectedStatus', 200);",
+              "pm.variables.set('itemSchema', 'user');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const users = pm.response.json();",
+              "pm.test('GET /users returned at least one user to choose from', function () {",
+              "    pm.expect(users, 'GET /users returned no users, so no userId can be selected').to.be.an('array').that.is.not.empty;",
+              "});",
+              "if (Array.isArray(users) && users.length > 0) {",
+              "    // Random pick (documented in the README) so the chain does not silently depend on one fixed user.",
+              "    const user = users[Math.floor(Math.random() * users.length)];",
+              "    pm.collectionVariables.set('userId', String(user.id));",
+              "    pm.test('Selected user id ' + user.id + ' stored in collection variable userId', function () {",
+              "        pm.expect(pm.collectionVariables.get('userId')).to.eql(String(user.id));",
+              "    });",
+              "} else {",
+              "    // Without a user the next requests would test nothing meaningful, so end the run here.",
+              "    postman.setNextRequest(null);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/users",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "users"
+          ]
+        }
+      }
+    },
+    {
+      "name": "2. Get posts of the selected user",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.variables.set('expectedStatus', 200);",
+              "pm.variables.set('itemSchema', 'post');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const userId = Number(pm.collectionVariables.get('userId'));",
+              "pm.test('Every returned post belongs to user ' + userId, function () {",
+              "    const posts = pm.response.json();",
+              "    pm.expect(posts).to.be.an('array').that.is.not.empty;",
+              "    const foreign = posts.filter(function (post) { return post.userId !== userId; });",
+              "    pm.expect(foreign, 'posts of other users').to.be.empty;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/posts?userId={{userId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "posts"
+          ],
+          "query": [
+            {
+              "key": "userId",
+              "value": "{{userId}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "3. Get a post that does not exist",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.variables.set('expectedStatus', 404);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Missing post returns an empty object', function () {",
+              "    pm.expect(pm.response.json()).to.eql({});",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/posts/{{missingPostId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "posts",
+            "{{missingPostId}}"
+          ]
+        }
+      }
+    }
+  ]
+}
